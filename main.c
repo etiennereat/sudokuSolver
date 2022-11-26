@@ -1,5 +1,7 @@
 #include "grille.h"
 #include "numeriseur.h"
+#include "solveur.h"
+
 int main (int argc, char ** argv)
 {
     char * name_file = "grille_test.png";
@@ -10,5 +12,6 @@ int main (int argc, char ** argv)
 
     print_grille(grilleREF);
 
+    free_grille(grilleREF);
     return 0;
 }

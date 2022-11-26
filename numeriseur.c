@@ -262,64 +262,9 @@ int detecte_value_of_cases(const char * fileImg, int storeLines[10], int storeCo
    return 0;
 }
 
-
-int detecte_value_of_cases_v2(const char * fileImg, int storeLines[10], int storeColumnes[10], grille * grilleREF, int width, int height, int rowbytes, png_bytepp rows){
-    // CHANGE TO THE ACTUAL PATH to the folder where the aocr.dll or aocr.so locates in
-   const char * libFolder = "/home/etienne/travail/projetPerso/sudokuSolver/";
-
-   LIBRARY_HANDLE libHandle = dynamic_load_aocr_library(libFolder);
-
-   // one time setup
-   int setup = c_com_asprise_ocr_setup(0);
-   if (setup != 1) {
-      return 1;
-   }
-
-   // starts the ocr engine; the pointer must be of long long type
-   long long ptrToApi = c_com_asprise_ocr_start("eng",  OCR_SPEED_FAST, NULL, NULL, NULL);
-   if (ptrToApi == 0) {
-      return 1;
-   }
-   char * s = c_com_asprise_ocr_recognize(ptrToApi, fileImg, -1,-1, -1,-1,-1,OCR_RECOGNIZE_TYPE_TEXT,OCR_OUTPUT_FORMAT_PLAINTEXT,NULL,NULL,NULL);
-   printf("%s",s);
-   c_com_asprise_ocr_stop(ptrToApi);
-
-   int index_next = 0;
-   for (int i = 0 ; i < 9; i++) {
-        for (int j = 0 ; j < 9 ; j++){
-            //check if the case is empty 
-            for(int k = storeLines[i] + (storeLines[i+1]-storeLines[i]) / 8; k < storeLines[i+1] - (storeLines[i+1]-storeLines[i]) / 8; k++){
-                if(rows[k][storeColumnes[j]+(storeColumnes[j+1]-storeColumnes[j])/2] < 64 ){
-                    printf("full in %d %d\n", i,j);
-                    switch(s[index_next]){
-                        case '1':
-                        case '2':
-                        case '3':
-                        case '4':
-                        case '5':
-                        case '6':
-                        case '7':
-                        case '8':
-                            set_in_grille(grilleREF,i,j,atoi(&s[index_next]));
-                            break;
-                        case '*':
-                            set_in_grille(grilleREF,i,j,9);
-                            break;
-                        default :
-                            set_in_grille(grilleREF,i,j,0);
-                    }
-                    index_next+=2;
-                    break;
-                }
-            }
-        }
-   }
-
-   return 0;
-}
-
 grille * read_png_to_grille (const char * png_file)
 {
+    //png variables managers
     png_structp	png_ptr;
     png_infop info_ptr;
     FILE * fp;
@@ -330,9 +275,15 @@ grille * read_png_to_grille (const char * png_file)
     int interlace_method;
     int compression_method;
     int filter_method;
-    int j;
     png_bytepp rows;
-    
+    int rowbytes;
+
+    //analyse variables
+    int storeLines[10];
+    int storecolumnes[10];
+    grille* grilleREF = init_grille();
+
+    //try to open png 
     fp = fopen (png_file, "rb");
     if (! fp) {
 	    fatal_error ("Cannot open '%s': %s\n", png_file, strerror (errno));
@@ -346,23 +297,18 @@ grille * read_png_to_grille (const char * png_file)
 	    fatal_error ("Cannot create PNG info structure");
     }
 
-    grille* grilleREF = malloc(sizeof(grille));
-    grilleREF->grille = malloc(sizeof(int)*81);
-
+    //hook data from png 
     png_init_io (png_ptr, fp);
     png_read_png (png_ptr, info_ptr, 0, 0);
     png_get_IHDR (png_ptr, info_ptr, & width, & height, & bit_depth,
 		  & color_type, & interlace_method, & compression_method,
 		  & filter_method);
     rows = png_get_rows (png_ptr, info_ptr);
-    printf ("Width is %d, height is %d\n", width, height);
-    int rowbytes;
     rowbytes = png_get_rowbytes (png_ptr, info_ptr);
+
+    //display data
+    printf ("Width is %d, height is %d\n", width, height);
     printf ("Row bytes = %d\n", rowbytes);
-
-
-    int storeLines[10];
-    int storecolumnes[10];
 
     //search lines
     detect_lines(rows,rowbytes,height,width,storeLines);
@@ -373,29 +319,8 @@ grille * read_png_to_grille (const char * png_file)
     //detecte value in setuped case 
     detecte_value_of_cases(png_file,storeLines,storecolumnes,grilleREF,width,height,rowbytes);
     
+    //close png 
+    fclose(fp);
+
     return grilleREF;
-}
-
-void set_in_grille(grille * grilleREF, int x, int y, int value){
-    grilleREF->grille[y*9 + x] = value;
-}
-
-int get_in_grille(grille * grilleREF, int x, int y){
-    return grilleREF->grille[y*9 + x];
-}
-
-void print_grille(grille * grilleREF){
-    printf("\n\n");
-    for(int i=0; i<9;i++){
-        for(int j = 0 ; j<9;j++){
-            int tmp = get_in_grille(grilleREF,i,j);
-            if(tmp == 0){
-                printf("- ");
-            }
-            else{
-                printf("%d ",tmp);
-            }
-        }
-        printf("\n");
-    }
 }
