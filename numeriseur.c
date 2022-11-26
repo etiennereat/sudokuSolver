@@ -372,7 +372,6 @@ grille * read_png_to_grille (const char * png_file)
 
     //detecte value in setuped case 
     detecte_value_of_cases(png_file,storeLines,storecolumnes,grilleREF,width,height,rowbytes);
-    print_grille(grilleREF);
     
     return grilleREF;
 }

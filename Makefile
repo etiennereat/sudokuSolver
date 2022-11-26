@@ -1,12 +1,12 @@
 CC=clang
 
-sudokuSolver: main.o grille.o
+sudokuSolver: main.o numeriseur.o
 	$(CC) -ldl -lpng -o $@ $^
 
-main.o: main.c grille.h
+main.o: main.c numeriseur.h
 	$(CC) -o $@ -c $<
 
-grille.o : grille.c grille.h asprise_ocr_api.h
+numeriseur.o : numeriseur.c grille.h asprise_ocr_api.h
 	$(CC) -o $@ -c $<
 
 ocr : test.o 
