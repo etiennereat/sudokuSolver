@@ -1,19 +1,26 @@
+
 CC=clang
 
-sudokuSolver: main.o grille.o
-	$(CC) -ldl -lpng -o $@ $^
+LDFLAGS = -ldl -lpng -lm -std=c99
 
-main.o: main.c grille.h
+solver: main.o solver.o grille.o ocr_sudoku.o pileSupp.o
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+main.o: main.c ocr_sudoku.h grille.h
 	$(CC) -o $@ -c $<
 
-grille.o : grille.c grille.h asprise_ocr_api.h
+ocr_sudoku.o: ocr_sudoku.c ocr_sudoku.h grille.h asprise_ocr_api.h
 	$(CC) -o $@ -c $<
 
-ocr : test.o 
-	$(CC) -ldl -o $@ $^
+solver.o: solver.c solver.h grille.h pileSupp.h
+	$(CC) -o $@ -c $<
 
-test.o : test.c asprise_ocr_api.h
+grille.o: grille.c grille.h
+	$(CC) -o $@ -c $<
+
+pileSupp.o: pileSupp.c pileSupp.h grille.h
 	$(CC) -o $@ -c $<
 
 clean:
-	rm -rf *.o sudokuSolver
+	rm -rf *.o solver
+

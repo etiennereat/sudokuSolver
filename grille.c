@@ -1,402 +1,252 @@
 #include "grille.h"
-#include "asprise_ocr_api.h"
+#include <string.h>
 
-               
-#define PBSTR "||||||||||||||||||||SCAN||IN||PROGRESS||||||||||||||||||||||"
-#define PBWIDTH 60
-
-void printProgress(int percentage) {
-    int val = (int) percentage;
-    int lpad = (int) (percentage * PBWIDTH)/100;
-    int rpad = PBWIDTH - lpad;
-    printf("\r%3d%% [%.*s%*s]", val, lpad, PBSTR, rpad, "");
-    fflush(stdout);
+int get_carre_index(int x, int y) {
+    return (y / 3) * 3 + (x / 3);
 }
 
-static void
-fatal_error (const char * message, ...)
+int get_cell_index(int x, int y) {
+    return y * GRILLE_DIM + x;
+}
+
+grille *create_grille()
 {
-    va_list args;
-    va_start (args, message);
-    vfprintf (stderr, message, args);
-    va_end (args);
-    exit (EXIT_FAILURE);
+    grille *g = malloc(sizeof(grille));
+    if (g == NULL) return NULL;
+
+    for (int x = 0; x < GRILLE_DIM; x++)
+    {
+        for (int y = 0; y < GRILLE_DIM; y++)
+        {
+            g->cells[get_cell_index(x, y)].current_value = EMPTY_CELL_VALUE;
+            g->cells[get_cell_index(x, y)].state         = CELL_UNSET;
+        }
+        g->lines[x].free_values   = MASK_NO_FILTER;
+        g->collomn[x].free_values = MASK_NO_FILTER;
+        g->carres[x].free_values  = MASK_NO_FILTER;
+    }
+    g->nb_unset_cell = GRILLE_DIM * GRILLE_DIM;
+    return g;
 }
 
-
-// function to swap elements
-void swap(int *a, int *b) {
-  int t = *a;
-  *a = *b;
-  *b = t;
+void delete_grille(grille *g)
+{
+    if (g != NULL)
+        free(g);
 }
 
-// function to find the partition position
-int partition(int array[], int low, int high) {
-  
-  // select the rightmost element as pivot
-  int pivot = array[high];
-  
-  // pointer for greater element
-  int i = (low - 1);
-
-  // traverse each element of the array
-  // compare them with the pivot
-  for (int j = low; j < high; j++) {
-    if (array[j] <= pivot) {
-        
-      // if element smaller than pivot is found
-      // swap it with the greater element pointed by i
-      i++;
-      
-      // swap element at i with element at j
-      swap(&array[i], &array[j]);
-    }
-  }
-
-  // swap the pivot element with the greater element at i
-  swap(&array[i + 1], &array[high]);
-  
-  // return the partition point
-  return (i + 1);
+__uint16_t get_mask_candidat(grille *g, int x, int y)
+{
+    if (g->cells[get_cell_index(x, y)].state != CELL_UNSET)
+        return 0;
+    return g->lines[y].free_values
+         & g->collomn[x].free_values
+         & g->carres[get_carre_index(x, y)].free_values;
 }
 
-void quickSort(int array[], int low, int high) {
-  if (low < high) {
-    
-    // find the pivot element such that
-    // elements smaller than pivot are on left of pivot
-    // elements greater than pivot are on right of pivot
-    int pi = partition(array, low, high);
-    
-    // recursive call on the left of pivot
-    quickSort(array, low, pi - 1);
-    
-    // recursive call on the right of pivot
-    quickSort(array, pi + 1, high);
-  }
+__uint16_t is_candidat(grille *g, int x, int y, int chiffre)
+{
+    return get_mask_candidat(g, x, y) & 1 << chiffre;
 }
 
-void printArray(int array[], int size) {
-  for (int i = 0; i < size; ++i) {
-    printf("%d  ", array[i]);
-  }
-  printf("\n");
+int have_single_candidat(grille *g, int x, int y, __uint16_t *candidat)
+{
+    *candidat = 0;
+    __uint16_t mask_candidat = get_mask_candidat(g, x, y);
+
+    if (mask_candidat == 0)
+        return NO_CANDIDAT;
+
+    switch (mask_candidat)
+    {
+        case MASK_FILTER_1: *candidat = 1; return SINGLE_CANDIDAT;
+        case MASK_FILTER_2: *candidat = 2; return SINGLE_CANDIDAT;
+        case MASK_FILTER_3: *candidat = 3; return SINGLE_CANDIDAT;
+        case MASK_FILTER_4: *candidat = 4; return SINGLE_CANDIDAT;
+        case MASK_FILTER_5: *candidat = 5; return SINGLE_CANDIDAT;
+        case MASK_FILTER_6: *candidat = 6; return SINGLE_CANDIDAT;
+        case MASK_FILTER_7: *candidat = 7; return SINGLE_CANDIDAT;
+        case MASK_FILTER_8: *candidat = 8; return SINGLE_CANDIDAT;
+        case MASK_FILTER_9: *candidat = 9; return SINGLE_CANDIDAT;
+        default:            return MULTI_CANDIDAT;
+    }
 }
 
+void set_initial_value_cell(grille *g, int x, int y, __uint16_t value)
+{
+    int idx = get_cell_index(x, y);
 
-int storeLineScore(int score,int nbLine,int storeLines[100][2]){
-    for(int i = 0 ; i < 100 ; i++ ){
-        if(score > storeLines[i][0]){    
-            for(int j = 99 ; j > i ; j--){
-                storeLines[j][0] = storeLines[j-1][0];
-                storeLines[j][1] = storeLines[j-1][1];
-            }
-            storeLines[i][0] = score;
-            storeLines[i][1] = nbLine;
-            return 1;
-        }
-    }
-    return 0;
-}   
+    if (g->cells[idx].state == CELL_UNSET)
+        g->nb_unset_cell--;
 
+    g->cells[idx].current_value = value;
+    g->cells[idx].state         = CELL_INITIAL_SET;
 
-void detect_lines(png_bytepp rows,int rowbytes, int height, int width, int result[10]){
-    int storeLines[100][2];
-    for(int i = 0 ; i<100;i++){
-        storeLines[i][0] = 0;
-        storeLines[i][1] = 0;
-    }
-    //search lines
-    int tolerence = 0;
-    int delay = 0;
-    for (int j = 0; j < height; j++) {
-        png_bytep row;
-        row = rows[j];
-        int compteur = 0;
-        int score = 0;
-        for (int i = 0; i < rowbytes; i++) {
-            png_byte pixel;
-            pixel = row[i];
-            if (pixel < 64) {
-                compteur++;
-            }
-
-        }
-        storeLineScore(compteur,j,storeLines);
-    }
-
-//search max to detect ligne 
-    int max=0;
-    for(int i =0; i<100;i++){
-        if(max < storeLines[i][0]){
-            max = storeLines[i][0];
-        }
-    }
-
-    int sortedLines[100];
-    int nb = 0;
-    for(int i =0; i<100;i++){
-        if(max - max/9 < storeLines[i][0]){
-            sortedLines[nb]=storeLines[i][1];
-            nb++;
-        }
-    }
-    quickSort(sortedLines,0,nb-1);
-
-    int nb_index = 0;
-
-    for(int i = 0; i< nb; i++){
-        if(i == 0 || (sortedLines[i-1] + height/20 < ( sortedLines[i] ) )){
-            result[nb_index] = sortedLines[i];
-            nb_index++;
-        }
-    }
-
-
-
+    __uint16_t value_mask = ~(1 << value);
+    g->lines[y].free_values                      &= value_mask;
+    g->collomn[x].free_values                    &= value_mask;
+    g->carres[get_carre_index(x, y)].free_values &= value_mask;
 }
 
-void detect_columnes(png_bytepp rows,int rowbytes, int height, int width, int result[10]){
+int set_cell(grille *g, int x, int y, __uint16_t value)
+{
+    int idx = get_cell_index(x, y);
 
-    int storecolumnes[100][2];
-    for(int i = 0 ; i<100;i++){
-        storecolumnes[i][0] = 0;
-        storecolumnes[i][1] = 0;
-    }
-    for (int i = 0; i < rowbytes; i++) {
-        png_bytep row;
-        int compteur = 0;
-        int score = 0;
-        for (int j = 0; j < height; j++) {
-            row = rows[j];
-            png_byte pixel;
-            pixel = row[i];
-            if (pixel < 64) {
-                compteur++;
-            }
+    if (g->cells[idx].state == CELL_UNSET)
+        g->nb_unset_cell--;
 
-        }
-        storeLineScore(compteur,i,storecolumnes);
-        
-    }
+    g->cells[idx].current_value = value;
+    g->cells[idx].state         = CELL_DEDUCTION_SET;
 
-    //search max to detect ligne 
-    int max=0;
-    for(int i =0; i<100;i++){
-        if(max < storecolumnes[i][0]){
-            max = storecolumnes[i][0];
-        }
-    }
+    __uint16_t value_mask = ~(1 << value);
+    g->lines[y].free_values                      &= value_mask;
+    g->collomn[x].free_values                    &= value_mask;
+    g->carres[get_carre_index(x, y)].free_values &= value_mask;
 
-    int sortedColomnes[100];
-    int nb = 0;
-    for(int i =0; i<100;i++){
-        if(max - max/ 9 < storecolumnes[i][0]){
-            sortedColomnes[nb]=storecolumnes[i][1];
-            nb++;
+    __uint16_t neighbor_candidat;
+
+    /* propagation sur la colonne */
+    for (int y_neighbor = 0; y_neighbor < GRILLE_DIM; y_neighbor++)
+    {
+        if (y_neighbor == y) continue;
+        if (g->cells[get_cell_index(x, y_neighbor)].state != CELL_UNSET) continue;
+
+        switch (have_single_candidat(g, x, y_neighbor, &neighbor_candidat))
+        {
+            case NO_CANDIDAT:
+                return GRILLE_IMPOSSIBLE;
+            case SINGLE_CANDIDAT:
+                if (set_cell(g, x, y_neighbor, neighbor_candidat) == GRILLE_IMPOSSIBLE)
+                    return GRILLE_IMPOSSIBLE;
+                break;
+            default: break;
         }
     }
 
+    /* propagation sur la ligne */
+    for (int x_neighbor = 0; x_neighbor < GRILLE_DIM; x_neighbor++)
+    {
+        if (x_neighbor == x) continue;
+        if (g->cells[get_cell_index(x_neighbor, y)].state != CELL_UNSET) continue;
 
-    quickSort(sortedColomnes,0,nb-1);
-
-    int nb_index = 0;
-
-    for(int i = 0; i< nb; i++){
-        if(i == 0 || (sortedColomnes[i-1] + rowbytes/10 < ( sortedColomnes[i]) )){
-            result[nb_index] = sortedColomnes[i];
-            nb_index++;
+        switch (have_single_candidat(g, x_neighbor, y, &neighbor_candidat))
+        {
+            case NO_CANDIDAT:
+                return GRILLE_IMPOSSIBLE;
+            case SINGLE_CANDIDAT:
+                if (set_cell(g, x_neighbor, y, neighbor_candidat) == GRILLE_IMPOSSIBLE)
+                    return GRILLE_IMPOSSIBLE;
+                break;
+            default: break;
         }
     }
 
+    /* propagation sur le carré */
+    for (int y_square = 0; y_square < 3; y_square++)
+    {
+        for (int x_square = 0; x_square < 3; x_square++)
+        {
+            int y_neighbor = y - y % 3 + y_square;
+            int x_neighbor = x - x % 3 + x_square;
 
-}
+            if (x_neighbor == x && y_neighbor == y) continue;
+            if (g->cells[get_cell_index(x_neighbor, y_neighbor)].state != CELL_UNSET) continue;
 
-int detecte_value_of_cases(const char * fileImg, int storeLines[10], int storeColumnes[10], grille * grilleREF, int width, int height, int rowbytes){
-    // CHANGE TO THE ACTUAL PATH to the folder where the aocr.dll or aocr.so locates in
-   const char * libFolder = "/home/etienne/travail/projetPerso/sudokuSolver/";
-
-   LIBRARY_HANDLE libHandle = dynamic_load_aocr_library(libFolder);
-
-   // one time setup
-   int setup = c_com_asprise_ocr_setup(0);
-   if (setup != 1) {
-      return 1;
-   }
-
-   // starts the ocr engine; the pointer must be of long long type
-   long long ptrToApi = c_com_asprise_ocr_start("eng",  OCR_SPEED_FAST, NULL, NULL, NULL);
-   if (ptrToApi == 0) {
-      return 1;
-   }
-   for (int j = 0 ; j < 9; j++) {
-        for (int i = 0 ; i < 9 ; i++){
-            freopen("log.txt","w",stdout);
-            char * s = c_com_asprise_ocr_recognize(ptrToApi, fileImg, -1, (storeColumnes[j]* width)/rowbytes,storeLines[i], width/8,height/8,
-                OCR_RECOGNIZE_TYPE_TEXT,OCR_OUTPUT_FORMAT_PLAINTEXT,
-                NULL,NULL,NULL);
-            freopen("/dev/tty","w",stdout);
-            printProgress((j*9+i)*100 / 80);
-//            printf("\n\nscan at %d %d with %d %d : %s \n",(storeColumnes[j]* width)/rowbytes,storeLines[i], (storeColumnes[j+1]* width)/rowbytes - (storeColumnes[j]* width)/rowbytes, storeLines[i+1] - storeLines[i],s);
-            switch(s[0]){
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':
-                case '8':
-                    set_in_grille(grilleREF,i,j,atoi(s));
+            switch (have_single_candidat(g, x_neighbor, y_neighbor, &neighbor_candidat))
+            {
+                case NO_CANDIDAT:
+                    return GRILLE_IMPOSSIBLE;
+                case SINGLE_CANDIDAT:
+                    if (set_cell(g, x_neighbor, y_neighbor, neighbor_candidat) == GRILLE_IMPOSSIBLE)
+                        return GRILLE_IMPOSSIBLE;
                     break;
-                case '*':
-                    set_in_grille(grilleREF,i,j,9);
-                    break;
-                default :
-                    set_in_grille(grilleREF,i,j,0);
+                default: break;
             }
         }
-   }
-   c_com_asprise_ocr_stop(ptrToApi);
-   return 0;
+    }
+
+    return GRILLE_OK;
 }
 
+int set_supposition(grille *g, int x, int y, __uint16_t value)
+{
+    int result = set_cell(g, x, y, value);
+    g->cells[get_cell_index(x, y)].state = CELL_SUPPOSITION_SET;
+    return result;
+}
 
-int detecte_value_of_cases_v2(const char * fileImg, int storeLines[10], int storeColumnes[10], grille * grilleREF, int width, int height, int rowbytes, png_bytepp rows){
-    // CHANGE TO THE ACTUAL PATH to the folder where the aocr.dll or aocr.so locates in
-   const char * libFolder = "/home/etienne/travail/projetPerso/sudokuSolver/";
+void copy_grille(grille *destination, grille *source)
+{
+    memcpy(destination, source, sizeof(grille));
+}
 
-   LIBRARY_HANDLE libHandle = dynamic_load_aocr_library(libFolder);
+/* DEBUG DISPLAY */
 
-   // one time setup
-   int setup = c_com_asprise_ocr_setup(0);
-   if (setup != 1) {
-      return 1;
-   }
+const int color_foreground_BLACK         = 30;
+const int color_background_GREEN         = 42;
+const int color_background_LIGHT_CYAN    = 106;
+const int color_background_LIGHT_MAGENTA = 105;
 
-   // starts the ocr engine; the pointer must be of long long type
-   long long ptrToApi = c_com_asprise_ocr_start("eng",  OCR_SPEED_FAST, NULL, NULL, NULL);
-   if (ptrToApi == 0) {
-      return 1;
-   }
-   char * s = c_com_asprise_ocr_recognize(ptrToApi, fileImg, -1,-1, -1,-1,-1,OCR_RECOGNIZE_TYPE_TEXT,OCR_OUTPUT_FORMAT_PLAINTEXT,NULL,NULL,NULL);
-   printf("%s",s);
-   c_com_asprise_ocr_stop(ptrToApi);
+const char *exposants[] = {"⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"};
 
-   int index_next = 0;
-   for (int i = 0 ; i < 9; i++) {
-        for (int j = 0 ; j < 9 ; j++){
-            //check if the case is empty 
-            for(int k = storeLines[i] + (storeLines[i+1]-storeLines[i]) / 8; k < storeLines[i+1] - (storeLines[i+1]-storeLines[i]) / 8; k++){
-                if(rows[k][storeColumnes[j]+(storeColumnes[j+1]-storeColumnes[j])/2] < 64 ){
-                    printf("full in %d %d\n", i,j);
-                    switch(s[index_next]){
-                        case '1':
-                        case '2':
-                        case '3':
-                        case '4':
-                        case '5':
-                        case '6':
-                        case '7':
-                        case '8':
-                            set_in_grille(grilleREF,i,j,atoi(&s[index_next]));
-                            break;
-                        case '*':
-                            set_in_grille(grilleREF,i,j,9);
-                            break;
-                        default :
-                            set_in_grille(grilleREF,i,j,0);
+void print_grille(grille *g)
+{
+    printf("╔═══╤═══╤═══╦═══╤═══╤═══╦═══╤═══╤═══╗\n");
+
+    for (int y = 0; y < GRILLE_DIM; y++)
+    {
+        /* précalcul des couleurs et valeurs pour chaque cellule de la ligne */
+        char       colors[GRILLE_DIM][32];
+        __uint16_t values[GRILLE_DIM];
+
+        for (int x = 0; x < GRILLE_DIM; x++)
+        {
+            values[x] = g->cells[get_cell_index(x, y)].current_value;
+
+            switch (g->cells[get_cell_index(x, y)].state)
+            {
+                case CELL_SUPPOSITION_SET:
+                    sprintf(colors[x], "\033[%d;%dm", color_foreground_BLACK, color_background_LIGHT_MAGENTA);
+                    break;
+                case CELL_INITIAL_SET:
+                    sprintf(colors[x], "\033[%d;%dm", color_foreground_BLACK, color_background_GREEN);
+                    break;
+                case CELL_DEDUCTION_SET:
+                    sprintf(colors[x], "\033[%d;%dm", color_foreground_BLACK, color_background_LIGHT_CYAN);
+                    break;
+                case CELL_UNSET:
+                default:
+                    sprintf(colors[x], "\033[m");
+                    break;
+            }
+        }
+
+        /* affichage des 3 sous-lignes */
+        for (int i = 0; i < 3; i++)
+        {
+            for (int x = 0; x < GRILLE_DIM; x++)
+            {
+                printf("\033[m%s%s", x % 3 == 0 ? "║" : "│", colors[x]);
+
+                for (int j = 0; j < 3; j++)
+                {
+                    if (j == 1 && i == 1 && values[x] != EMPTY_CELL_VALUE)
+                        printf("%d", values[x]);
+                    else
+                    {
+                        int current_candidat = i * 3 + j + 1;
+                        printf("%s", is_candidat(g, x, y, current_candidat) ? exposants[current_candidat] : " ");
                     }
-                    index_next+=2;
-                    break;
                 }
             }
+            printf("\033[m║\n");
         }
-   }
 
-   return 0;
-}
-
-grille * read_png_to_grille (const char * png_file)
-{
-    png_structp	png_ptr;
-    png_infop info_ptr;
-    FILE * fp;
-    png_uint_32 width;
-    png_uint_32 height;
-    int bit_depth;
-    int color_type;
-    int interlace_method;
-    int compression_method;
-    int filter_method;
-    int j;
-    png_bytepp rows;
-    
-    fp = fopen (png_file, "rb");
-    if (! fp) {
-	    fatal_error ("Cannot open '%s': %s\n", png_file, strerror (errno));
-    }
-    png_ptr = png_create_read_struct (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (! png_ptr) {
-	    fatal_error ("Cannot create PNG read structure");
-    }
-    info_ptr = png_create_info_struct (png_ptr);
-    if (! png_ptr) {
-	    fatal_error ("Cannot create PNG info structure");
-    }
-
-    grille* grilleREF = malloc(sizeof(grille));
-    grilleREF->grille = malloc(sizeof(int)*81);
-
-    png_init_io (png_ptr, fp);
-    png_read_png (png_ptr, info_ptr, 0, 0);
-    png_get_IHDR (png_ptr, info_ptr, & width, & height, & bit_depth,
-		  & color_type, & interlace_method, & compression_method,
-		  & filter_method);
-    rows = png_get_rows (png_ptr, info_ptr);
-    printf ("Width is %d, height is %d\n", width, height);
-    int rowbytes;
-    rowbytes = png_get_rowbytes (png_ptr, info_ptr);
-    printf ("Row bytes = %d\n", rowbytes);
-
-
-    int storeLines[10];
-    int storecolumnes[10];
-
-    //search lines
-    detect_lines(rows,rowbytes,height,width,storeLines);
-
-    //search columnes
-    detect_columnes(rows,rowbytes,height,width,storecolumnes);
-
-    //detecte value in setuped case 
-    detecte_value_of_cases(png_file,storeLines,storecolumnes,grilleREF,width,height,rowbytes);
-    print_grille(grilleREF);
-    
-    return grilleREF;
-}
-
-void set_in_grille(grille * grilleREF, int x, int y, int value){
-    grilleREF->grille[y*9 + x] = value;
-}
-
-int get_in_grille(grille * grilleREF, int x, int y){
-    return grilleREF->grille[y*9 + x];
-}
-
-void print_grille(grille * grilleREF){
-    printf("\n\n");
-    for(int i=0; i<9;i++){
-        for(int j = 0 ; j<9;j++){
-            int tmp = get_in_grille(grilleREF,i,j);
-            if(tmp == 0){
-                printf("- ");
-            }
-            else{
-                printf("%d ",tmp);
-            }
-        }
-        printf("\n");
+        if (y == GRILLE_DIM - 1)
+            printf("╚═══╧═══╧═══╩═══╧═══╧═══╩═══╧═══╧═══╝\n");
+        else if (y % 3 == 2)
+            printf("╠═══╪═══╪═══╬═══╪═══╪═══╬═══╪═══╪═══╣\n");
+        else
+            printf("╟───┼───┼───╫───┼───┼───╫───┼───┼───╢\n");
     }
 }
